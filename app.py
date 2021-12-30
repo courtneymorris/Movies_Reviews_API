@@ -1,10 +1,15 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
+from flask_cors import CORS
+
+
+# pipenv install flask-cors
 
 import os
 
 app = Flask(__name__)
+CORS(app)
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(basedir, "app.sqlite")
 
@@ -13,22 +18,21 @@ ma = Marshmallow(app)
 
 
 class Movie(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, nullable=False)
     title = db.Column(db.String, nullable=False, unique=True)
     genre = db.Column(db.String, nullable=False)
     mpaa_rating = db.Column(db.String)
-    poster_image = db.Column(db.String, unique=True)
+    poster_image = db.Column(db.String)
     all_reviews = db.relationship("Review", backref="movie", cascade="all, delete, delete-orphan")
 
-    def __init__(self, title, genre, mpaa_rating, poster_image, all_reviews):
+    def __init__(self, title, genre, mpaa_rating, poster_image):
         self.title = title
         self.genre = genre
         self.mpaa_rating = mpaa_rating
         self.poster_image = poster_image
-        self.all_reviews = all_reviews
 
 class Review(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True, nullable=False)
     star_rating = db.Column(db.Float, nullable=False)
     review_text = db.Column(db.Text(280))
     movie_id = db.Column(db.Integer, db.ForeignKey("movie.id"), nullable=False)
@@ -48,7 +52,7 @@ multi_review_schema = ReviewSchema(many=True)
 
 class MovieSchema(ma.Schema):
     class Meta:
-        fields = ('id', 'title', 'genre', 'mpaa_rating', 'poster_image')
+        fields = ('id', 'title', 'genre', 'mpaa_rating', 'poster_image', 'all_reviews')
     all_reviews = ma.Nested(multi_review_schema)
 
 movie_schema = MovieSchema()
@@ -129,58 +133,53 @@ def delete_movie_by_id(id):
     db.session.commit()
     return jsonify("Movie successfully deleted")
 
+@app.route("/movie/add/multi", methods=["POST"])
+def add_multi_movies():
+    if request.content_type != "application/json":
+        return jsonify("Error: Data must be sent as JSON")
+
+    post_data = request.get_json()
+
+    new_records = []
+
+    for movie in post_data:
+        title = movie.get('title')
+        genre = movie.get('genre')
+        mpaa_rating = movie.get('mpaa_rating')
+        poster_image = movie.get('poster_image')
+
+        existing_movie_check = db.session.query(Movie).filter(Movie.title == title).first()
+        if existing_movie_check is None:
+            new_record = Movie(title, genre, mpaa_rating, poster_image)
+            db.session.add(new_record)
+            db.session.commit()
+            new_records.append(new_record)
+
+    return jsonify(multi_movie_schema.dump(new_records))
 
 
 
+# POST endpoint for a single review
+@app.route("/review/add", methods=["POST"])
+def add_review():
+    if request.content_type != 'application/json':
+        return jsonify('Error: Data must be sent as JSON')
 
+    post_data = request.get_json()
+    star_rating = post_data.get("star_rating")
+    review_text = post_data.get("review_text")
+    movie_id = post_data.get("movie_id")
 
+    if star_rating == None:
+        return jsonify("Error: You must provide a 'star_rating' key")
+    if movie_id == None:
+        return jsonify("Error: You must provide a 'movie_id' key")
 
+    new_record = Review(star_rating, review_text, movie_id)
+    db.session.add(new_record)
+    db.session.commit()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# pipenv install flask flask-sqlalchemy flask-marshmallow marshmallow-sqlalchemy
-
-#  In a Python repl:
-#  from app import db
-#  db.create_all()
-
-#  py app.py
-
-
-#  git add .
-#  git commit -m "Whatever you just included"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return jsonify(movie_schema.dump(new_record))
 
 
 
@@ -188,17 +187,3 @@ def delete_movie_by_id(id):
 
 if __name__ == "__main__":
     app.run(debug=True)
-
-
-
-
-
-
-
-
-
-
-
-#  git init
-#  git add .
-#  git commit -m "Initial commit"
